@@ -209,14 +209,19 @@ async function chooseStorageMode(rl) {
 }
 
 async function runMacOSSetup(rl) {
+  const onWindows = platform() === 'win32';
   print();
-  info("Detected platform: macOS");
-  info("Auto-extraction available via AppleScript");
+  info(onWindows ? "Detected platform: Windows" : "Detected platform: macOS");
+  info(onWindows
+    ? "Auto-extraction reads Chrome's on-disk Slack session (DPAPI cookies)"
+    : "Auto-extraction available via AppleScript");
   print();
   print("Requirements:");
   print("  • Chrome browser installed");
-  print("  • Logged into Slack in a Chrome tab");
-  print("  • That Slack tab currently open");
+  print("  • Logged into Slack in Chrome");
+  print(onWindows
+    ? "  • The Slack tab can be closed; the session just has to be on disk"
+    : "  • That Slack tab currently open");
 
   await pressEnterToContinue(rl);
 
@@ -682,7 +687,7 @@ async function main() {
     await chooseStorageMode(rl);
     info(`Tokens will be stored in: ${storageDestination()}`);
 
-    if (IS_MACOS && isAutoRefreshAvailable()) {
+    if (isAutoRefreshAvailable()) {
       success = await runMacOSSetup(rl);
     } else {
       success = await runManualSetup(rl);

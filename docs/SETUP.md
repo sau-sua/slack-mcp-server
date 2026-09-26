@@ -177,7 +177,7 @@ Point the client's stdio MCP configuration at:
 npx -y @jtalk22/slack-mcp
 ```
 
-On Windows or Linux, pass `SLACK_TOKEN` and `SLACK_COOKIE` through the client's environment configuration because macOS Chrome/Keychain extraction is unavailable.
+On Linux, pass `SLACK_TOKEN` and `SLACK_COOKIE` through the client's environment configuration. On Windows, Chrome auto-extraction reads a DPAPI (v10) Slack cookie and the cached xoxc token. Current Chrome app-bound cookies (v20) still need `SLACK_COOKIE` set by hand.
 
 ## Restart and prove the connection
 

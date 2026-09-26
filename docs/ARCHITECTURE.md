@@ -21,7 +21,7 @@ Priority 2: Token File (~/.slack-mcp-tokens.json)
     ↓ fallback
 Priority 3: macOS Keychain (encrypted)
     ↓ fallback
-Priority 4: Chrome Auto-Extraction (macOS only)
+Priority 4: Chrome Auto-Extraction (macOS, and Windows when the cookie is DPAPI)
 ```
 
 ## Stability Features
@@ -75,6 +75,6 @@ slack-mcp-server/
 |---------|-------|-------|---------|
 | MCP Server | Yes | Yes | Yes |
 | Token File | Yes | Yes | Yes |
-| Auto-Refresh from Chrome | Yes | No | No |
+| Auto-Refresh from Chrome | Yes | No | Yes, DPAPI (v10) cookies only |
 | Keychain Storage | Yes | No | No |
 | Web UI | Yes | Yes | Yes |

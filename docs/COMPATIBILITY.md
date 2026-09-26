@@ -30,7 +30,7 @@ The local package is a stdio MCP server. Client support is classified by the evi
 | Platform | Automatic local extraction | Storage |
 |---|---|---|
 | macOS + Chrome | Yes | `auto`, `keychain-only`, or `file` |
-| Windows | No | environment or file |
+| Windows + Chrome | Yes, when the Slack cookie is still DPAPI (v10). App-bound (v20) cookies are not read | environment or file |
 | Linux | No | environment or file |
 | Docker/CI | No | mounted file or environment |
 

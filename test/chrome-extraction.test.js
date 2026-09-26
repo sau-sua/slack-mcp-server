@@ -2,9 +2,9 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir, platform } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { pbkdf2Sync, createCipheriv } from "node:crypto";
+import { pbkdf2Sync, createCipheriv, randomBytes } from "node:crypto";
 
 // Chrome credential extraction was untestable before #168: every failure
 // collapsed to null and the pipeline needed a real Chrome install. This rig
@@ -25,6 +25,8 @@ const {
   extractFromChrome,
   getLastExtractionError,
   _setSafeStorageAdapterForTests,
+  _setExtractionPlatformForTests,
+  _setWindowsKeyAdapterForTests,
   _extractCookieForProfileForTests,
 } = await import("../lib/token-store.js");
 
@@ -43,12 +45,21 @@ function encryptV10(value, password) {
 }
 
 /** Build a profile dir with a real cookie DB; optionally a LevelDB token log. */
-function buildProfile(base, name, { cookie = true, token = false, password = PASSWORD } = {}) {
+function encryptWindowsV10(value, key) {
+  const nonce = Buffer.alloc(12, 7);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const ciphertext = Buffer.concat([cipher.update(value, "utf-8"), cipher.final()]);
+  return Buffer.concat([Buffer.from("v10"), nonce, ciphertext, cipher.getAuthTag()]);
+}
+
+function buildProfile(base, name, { cookie = true, token = false, password = PASSWORD, encryptedHex = null, cookieRel = "Cookies" } = {}) {
   const dir = join(base, name);
   mkdirSync(dir, { recursive: true });
   if (cookie) {
-    const blob = encryptV10(COOKIE_VALUE, password).toString("hex");
-    execFileSync("sqlite3", [join(dir, "Cookies"),
+    const blob = encryptedHex || encryptV10(COOKIE_VALUE, password).toString("hex");
+    const cookiePath = join(dir, cookieRel);
+    mkdirSync(dirname(cookiePath), { recursive: true });
+    execFileSync("sqlite3", [cookiePath,
       "CREATE TABLE cookies (host_key TEXT, name TEXT, encrypted_value BLOB);" +
       `INSERT INTO cookies VALUES ('.slack.com', 'd', X'${blob}');`
     ]);
@@ -81,6 +92,8 @@ function chromeBase() {
 
 beforeEach(() => {
   _setSafeStorageAdapterForTests(null);
+  _setExtractionPlatformForTests(null);
+  _setWindowsKeyAdapterForTests(null);
   delete process.env.SLACK_MCP_CHROME_USER_DATA_DIR;
   delete process.env.SLACK_MCP_CHROME_PROFILE;
   delete process.env.SLACK_MCP_EXTRACTION_MODE;
@@ -187,4 +200,45 @@ test("per-profile failure reasons surface in the final extraction error", { skip
   const err = getLastExtractionError();
   assert.equal(err.code, "leveldb_no_matching_profile");
   assert.match(err.detail, /OnlyCookie: cookie ok, no cached xoxc token/);
+});
+
+async function writeCookieDb(cookiePath, hex) {
+  const { DatabaseSync } = await import("node:sqlite");
+  mkdirSync(dirname(cookiePath), { recursive: true });
+  const db = new DatabaseSync(cookiePath);
+  db.exec("CREATE TABLE cookies (host_key TEXT, name TEXT, encrypted_value BLOB);");
+  db.prepare("INSERT INTO cookies (host_key, name, encrypted_value) VALUES (?, ?, ?)").run(".slack.com", "d", Buffer.from(hex, "hex"));
+  db.close();
+}
+
+test("windows extraction decrypts a DPAPI-style v10 cookie from Network/Cookies", async () => {
+  const key = randomBytes(32);
+  const base = chromeBase();
+  process.env.SLACK_MCP_EXTRACTION_MODE = "leveldb";
+  writeFileSync(join(base, "Local State"), JSON.stringify({ profile: { info_cache: { Default: {} } } }));
+  _setExtractionPlatformForTests("win32");
+  _setWindowsKeyAdapterForTests({ getKey() { return key; } });
+
+  const dir = buildProfile(base, "Default", { cookie: false, token: true });
+  await writeCookieDb(join(dir, "Network", "Cookies"), encryptWindowsV10(COOKIE_VALUE, key).toString("hex"));
+
+  const result = extractFromChrome();
+  assert.ok(result, `extraction failed: ${JSON.stringify(getLastExtractionError())}`);
+  assert.equal(result.token, CACHED_TOKEN);
+  assert.equal(result.cookie, COOKIE_VALUE);
+  assert.equal(result.extraction_mode, "leveldb");
+});
+
+test("windows app-bound v20 cookies are not decrypted", async () => {
+  const base = chromeBase();
+  process.env.SLACK_MCP_EXTRACTION_MODE = "leveldb";
+  writeFileSync(join(base, "Local State"), JSON.stringify({ profile: { info_cache: { Default: {} } } }));
+  _setExtractionPlatformForTests("win32");
+  _setWindowsKeyAdapterForTests({ getKey() { throw new Error("DPAPI should not be called for v20"); } });
+
+  const dir = buildProfile(base, "Default", { cookie: false, token: true });
+  await writeCookieDb(join(dir, "Cookies"), Buffer.concat([Buffer.from("v20"), Buffer.alloc(32, 1)]).toString("hex"));
+
+  assert.equal(extractFromChrome(), null);
+  assert.equal(getLastExtractionError().code, "app_bound_cookie");
 });
